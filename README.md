@@ -1,36 +1,195 @@
-# Introduction
+<?php
 
-This is a skeleton application using the Hyperf framework. This application is meant to be used as a starting place for those looking to get their feet wet with Hyperf Framework.
+namespace app\controller;
 
-# Requirements
+use app\BaseController;
+use Elasticsearch\ClientBuilder;
+use think\App;
+use app\Request;
+use think\facade\Db;
 
-Hyperf has some requirements for the system environment, it can only run under Linux and Mac environment, but due to the development of Docker virtualization technology, Docker for Windows can also be used as the running environment under Windows.
+class Test extends BaseController
+{
+    //https://www.jianshu.com/p/afbf3a155d55
+    protected $esClent;
+    protected $goodsName = "goods_name";
+    public function __construct(App $app)
+    {
+        parent::__construct($app);
+        $params = [
+            "http://192.168.31.69:9200"
+        ];
+        $this->esClent =ClientBuilder::create()->setHosts($params)->build();
+       if (!$this->exists()){
+             $this->createMappings();
+//             halt(1);
+       }
+//       halt(10);
+//        try {
+////           dump($this->getMappings());
+//            $this->deleteIndex();
+//        }catch (\Exception $e){
+//           dump($e->getMessage()) ;
+//           dump($e->getCode()) ;
+//        }
+    }
+    public function index()
+    {
+        echo time();
+    }
 
-The various versions of Dockerfile have been prepared for you in the [hyperf/hyperf-docker](https://github.com/hyperf/hyperf-docker) project, or directly based on the already built [hyperf/hyperf](https://hub.docker.com/r/hyperf/hyperf) Image to run.
+    /**
+     * 创建数据库
+     * @return array
+     */
+    public function createMappings() {
+        $params = [
+            "index" => $this->goodsName,
+            "body" => [
+                "mappings" => [
+                    "properties" => [
+                        "id" => [
+                            "type" => "integer", // 字符串
+                        ],
+                        "goods_sn" => [
+                            "type" => "text"
+                        ],
+                        "goods_name1" => [
+                            "type" => "text",
+                            "analyzer" => "ik_max_word",
+                        ],
+                        "goods_number" => [
+                            "type" => "integer"
+                        ],
+                        "is_hot" => [
+                            "type" => "integer"
+                        ],
+                        "is_on_sale" => [
+                            "type" => "integer"
+                        ],
+                        "is_delete" => [
+                            "type" => "integer"
+                        ]
+                    ],
 
-When you don't want to use Docker as the basis for your running environment, you need to make sure that your operating environment meets the following requirements:  
+                ],
 
- - PHP >= 7.3
- - Swoole PHP extension >= 4.5，and Disabled `Short Name`
- - OpenSSL PHP extension
- - JSON PHP extension
- - PDO PHP extension （If you need to use MySQL Client）
- - Redis PHP extension （If you need to use Redis Client）
- - Protobuf PHP extension （If you need to use gRPC Server of Client）
+            ]
+        ];
+        return $this->esClent->indices()->create($params);
+    }
 
-# Installation using Composer
+    /**
+     * 获取字段值
+     * @return array
+     */
+    public function getMappings () {
+        $params = [
+            "index" => $this->goodsName,
+        ];
+//        return $this->esClent->indices()->exists($params);
+        return $this->esClent->indices()->getMapping($params);
+    }
 
-The easiest way to create a new Hyperf project is to use Composer. If you don't have it already installed, then please install as per the documentation.
+    /**
+     * 表是否存在
+     * @return bool
+     */
+    public function exists()
+    {
+        $params = [
+            "index" => $this->goodsName,
+        ];
+        return $this->esClent->indices()->exists($params);
+    }
 
-To create your new Hyperf project:
+    /**
+     * 删除
+     * @return array
+     */
+    public function deleteIndex() {
+        $params = ["index" => $this->goodsName];
+        $response = $this->esClent->indices()->delete($params);
+        return $response;
+    }
 
-$ composer create-project hyperf/hyperf-skeleton path/to/install
+    /**
+     * 插入数据
+     * @return void
+     * @throws \think\db\exception\DataNotFoundException
+     * @throws \think\db\exception\DbException
+     * @throws \think\db\exception\ModelNotFoundException
+     */
+    public function insertData()
+    {
+          $data =   Db::name('goods')->select();
+          foreach ($data as $key => $value){
+             $param = [
+                 "index" => $this->goodsName,
+                 'id' => $value['goods_id'],
+                 'body' => [
+                    'id' => $value['goods_id'],
+                    'goods_sn' => $value['goods_sn'],
+                    'goods_name1' => $value['goods_name'],
+                    'goods_number' => $value['goods_number'],
+                    'is_hot' => $value['is_hot'],
+                    'is_on_sale' => $value['is_on_sale'],
+                    'is_delete' => $value['is_delete'],
+                 ]
+             ];
+             $this->esClent->index($param);
+          }
+    }
 
-Once installed, you can run the server immediately using the command below.
+    /**
+     * 获取数据  并且关键词显示高亮
+     * @return void
+     */
+    public function getData()
+    {
+        $this->update();
+        return;
+        $param = [
+            "index" => $this->goodsName,
+            "body" => [
+                "query" => [
+                    "match" => [
+                        "goods_name1" => "玻尿"
+                    ]
+                ],
+                "highlight" => [
+                    "pre_tags" => "<b class='key' style='color:red'>",
+                    "post_tags"=> "</b>",
+                    "fields" => [
+                        "goods_name1" => (object)[]
+                    ]
+                ],
+                'from' => 1,
+                'size' => 4
+            ]
+        ];
+       $data =  $this->esClent->search($param);
+       halt($data);
+    }
 
-$ cd path/to/install
-$ php bin/hyperf.php start
+    /**
+     * 修改数据
+     * @return void
+     */
+    public  function update()
+    {
+        $param = [
+            "index" => $this->goodsName,
+            "id" =>  1083,
+            "body" => [
+                'doc' => [
+                    "is_hot" => 1
+                ],
+            ]
+       ];
+      $res =  $this->esClent->update($param);
+      halt($res);
+    }
 
-This will start the cli-server on port `9501`, and bind it to all network interfaces. You can then visit the site at `http://localhost:9501/`
 
-which will bring up Hyperf default home page.
+}
